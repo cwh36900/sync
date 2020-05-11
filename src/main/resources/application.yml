@@ -19,7 +19,7 @@ spring:
       enabled: true
   datasource:
     driver-class-name: com.xugu.cloudjdbc.Driver
-    url: jdbc:xugu://10.40.17.33:5138/BABJ_SMDB?char_set=utf8&compatibleoracle=false
+    url: jdbc:xugu://10.40.17.33:5138/BABJ_SMDB?ips=10.40.17.34,10.40.17.32&char_set=utf8&compatibleoracle=false
     username: USR_SOD
     password: Pnmic_qwe123
     type: com.alibaba.druid.pool.DruidDataSource
@@ -45,3 +45,5 @@ mybatis:
   callSettersOnNulls:  true
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+ei:
+  eiUrl: http://127.0.0.1:29999/transfer

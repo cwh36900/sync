@@ -4,12 +4,12 @@
 
     <!-- 条件查询 -->
     <select id="getDatabaseInfo" resultType="com.piesat.sod.sync.entity.DatabaseEntity">
-        select a.DATABASE_ID as databaseId ,a.DATABASE_NAME as databaseName,
-        a.DRIVER_CLASS_NAME as driverClass,a.DATABASE_INSTANCE as databaseInstance,a.DATABASE_SCHEMA_NAME as databaseSchema,
-        b.DATABASE_URL as databaseUrl,c.DATABASE_USER as databaseUser,c.DATABASE_PASS as databasePassword
-        from dmin_db_physics_define a  left join dmin_db_physics_connection b
-        on  a.DATABASE_ID= b.DATABASE_ID left join  dmin_db_physics_user c
-        on a.DATABASE_ID = c.DATABASE_ID  where a.DATABASE_CLASSIFY = '物理库' and c.DATABASE_USER='usr_manager'
+        select a.ID as databaseId ,a.DATABASE_NAME as databaseName,
+        b.DRIVER_CLASS_NAME as driverClass,b.DATABASE_INSTANCE as databaseInstance,a.SCHEMA_NAME as databaseSchema,
+        b.DATABASE_URL as databaseUrl,c.USER_NAME as databaseUser,c.PASS_WORD as databasePassword
+        from T_SOD_DATABASE a  left join T_SOD_DATABASE_DEFINE b
+        on  a.DATABASE_DEFINE_ID= b.ID left join  T_SOD_DATABASE_ADMINISTRATOR c
+        on b.ID = c.DATABASE_ID  where a.DATABASE_CLASSIFY = '物理库' and a.SCHEMA_NAME &lt;&gt; ''
     </select>
 
 </mapper>

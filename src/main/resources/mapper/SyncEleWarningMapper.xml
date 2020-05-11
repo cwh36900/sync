@@ -4,10 +4,10 @@
 
     <!-- 条件查询 -->
     <select id="getSyncEleWarning" resultType="com.piesat.sod.sync.entity.EleWarningEntity">
-        select SOURCE_DATABASE_ID AS sourceDatabaseId,SOURCE_TABLE_NAME AS sourceTableName,TASK_NAME AS taskName,
-        TARGET_DATABASE_ID AS targetDatabaseId,TARGET_TABLE_NAME AS targetTableName,c.`INTERVAL` AS timeInterval,c.TASK_ID AS taskId,
-        c.TIME_LIMIT AS timeLimit,c.BIGGEST_DIFFERENCE AS biggestDifference from SYNC_TASK a,SYNC_MAPPING b,SYNC_ELE_WARNING c
-        where a.SLAVE_TABLES = CONCAT(b.RECORD_ID,'') and a.TASK_ID = c.TASK_ID
+        select SOURCE_DATABASE_ID AS sourceDatabaseId,SOURCE_TABLE_NAME AS sourceTableName,TASK_NAME AS taskName,EXEC_IP AS execIp,
+        TARGET_DATABASE_ID AS targetDatabaseId,TARGET_TABLE_NAME AS targetTableName,c.CHECK_INTERVAL AS timeInterval,c.TASK_ID AS taskId,
+        c.TIME_LIMIT AS timeLimit,c.BIGGEST_DIFFERENCE AS biggestDifference from T_SOD_JOB_SYNCTASK_INFO a,T_SOD_JOB_SYNCMAPPING_INFO b,T_SOD_JOB_SYNC_ELE_WARNING c
+        where a.SLAVE_TABLES = CONCAT(b.ID,'') and a.ID = c.TASK_ID
     </select>
 
 </mapper>

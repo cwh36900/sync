@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -41,11 +42,11 @@ public class TaskListService {
 		List<TaskList> l = new ArrayList<>();
 		for (EleWarningEntity e:syncEleWarning) {
 			TaskList tl = new TaskList();
-
 			tl.setId(e.getTaskId());
 			tl.setStatus(1);
 			tl.setTaskname(e.getTaskName());
 			tl.setCron(CronUtils.getCron(e.getTimeInterval()));
+//			tl.setCron("0 0/1 * * * ?");
 			tl.setCreatetime(new Date());
 			tl.setClazz("com.piesat.sod.job.job.SyncRunnable");
 			tl.setEleWarningEntity(e);

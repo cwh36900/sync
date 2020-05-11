@@ -14,6 +14,7 @@ public class EleWarningEntity {
     private String sourceTableName;
     private String targetDatabaseId;
     private String targetTableName;
+    private String execIp;
 
     private String taskId;
     private String taskName;

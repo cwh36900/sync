@@ -15,6 +15,7 @@ public class CronUtils {
         String HH = "*";
         String MM = "*";
         if (H != 0){
+            MM = "0";
             HH = "0/"+H;
         }
 
@@ -31,7 +32,7 @@ public class CronUtils {
     }
 
     public static void main(String[] args) {
-        BigDecimal bd = new BigDecimal("1.5");
+        BigDecimal bd = new BigDecimal("1");
         System.out.println(CronUtils.getCron(bd));
     }
 }
