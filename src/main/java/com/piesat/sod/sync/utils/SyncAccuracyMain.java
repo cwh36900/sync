@@ -1,29 +1,31 @@
 package com.piesat.sod.sync.utils;
 
+import com.alibaba.fastjson.JSONArray;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.piesat.sod.job.dto.Log;
 import com.piesat.sod.sync.config.DruidBuilder;
 import com.piesat.sod.sync.entity.DatabaseEntity;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.ResourceUtils;
 
-import java.io.*;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.sql.*;
+import java.sql.Date;
+import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author cwh
  * @date 2020年 04月27日 19:00:32
  */
 @Slf4j
-public class SyncMain {
+public class SyncAccuracyMain {
 
     static Map<String, Connection> connection = new HashMap<>();
 
@@ -45,9 +47,13 @@ public class SyncMain {
 
     static final String DB_INFO_SQL = "SELECT B.DATABASE_DEFINE_ID S_DB_ID,C.DATABASE_DEFINE_ID T_DB_ID,SOURCE_TABLE,TASK_NAME FROM T_SOD_JOB_SYNCTASK_INFO A LEFT JOIN T_SOD_DATABASE B ON A.SOURCE_DATABASE_ID = B.ID LEFT JOIN T_SOD_DATABASE C ON A.TARGET_DATABASE_ID = C.ID";
 
-    static final String TABLE_INFO_SQL = "SELECT SOURCE_TABLE_NAME,TARGET_TABLE_NAME FROM T_SOD_JOB_SYNCMAPPING_INFO WHERE ID = %s";
+    static final String TABLE_INFO_SQL = "SELECT SOURCE_TABLE_NAME,TARGET_TABLE_NAME,TARGET_TABLE_ID FROM T_SOD_JOB_SYNCMAPPING_INFO WHERE ID = %s";
 
-    static String COUNT_SQL = "SELECT COUNT(*) C FROM %s.%s WHERE D_DATETIME >= '%s' AND D_DATETIME < '%s' ";
+    static final String TABLE_UNIQUE_SQL = "SELECT UNIQUE_KEYS FROM T_SOD_JOB_SYNCCONFIG_INFO WHERE ID = %s";
+
+    static String SOURCE_INFO_SQL = "SELECT * FROM %s.%s WHERE D_DATETIME >= '%s' AND D_DATETIME < '%s' LIMIT 30";
+
+    static String TARGET_INFO_SQL = "SELECT * FROM %s.%s WHERE %s";
 
     static String smdbUrl = "";
     static String smdbUser = "";
@@ -169,17 +175,22 @@ public class SyncMain {
 
                         ResultSet rs1 = statement.executeQuery(formatSQL);
                         while (rs1.next()) {
-                            SyncInfo si = new SyncMain().new SyncInfo();
+                            SyncInfo si = new SyncAccuracyMain().new SyncInfo();
                             String source_table_name = rs1.getString("SOURCE_TABLE_NAME");
                             String target_table_name = rs1.getString("TARGET_TABLE_NAME");
+                            String target_table_id = rs1.getString("TARGET_TABLE_ID");
+                            String tableUniqueSql = String.format(TABLE_UNIQUE_SQL, target_table_id);
+                            ResultSet resultSet = statement.executeQuery(tableUniqueSql);
+                            if (resultSet.next()) {
+                                String uniqueKeys = resultSet.getString(1);
+                                List<String> keys = Arrays.stream(uniqueKeys.split(",")).collect(Collectors.toList());
+                                si.setUniqueKeys(keys);
+                            }
                             si.setTaskName(ss.get("TASK_NAME"));
                             si.setSDbId(ss.get("S_DB_ID"));
                             si.setTDbId(ss.get("T_DB_ID"));
                             si.setSourceTableName(source_table_name);
                             si.setTargetTableName(target_table_name);
-//                            if (!source_table_name.equalsIgnoreCase("SURF_WEA_GLB_MUL_HOR_TAB")&&!source_table_name.equalsIgnoreCase("OCEN_SHB_GLB_MUL_TAB")){
-//                                continue;
-//                            }
                             siList.add(si);
                         }
                         rs1.close();
@@ -194,78 +205,126 @@ public class SyncMain {
             LocalDateTime dateTime = LocalDateTime.now();
             String fileName = String.format("%s_out.xlsx", DTF1.format(dateTime));
             List<Map<String, Object>> values = Lists.newArrayList();
+            List<Map<String, Object>> contentValues = Lists.newArrayList();
             siList.forEach(e -> {
                 String taskName = e.getTaskName();
-                boolean etl = taskName.contains("ETL");
                 String sDbId = e.getSDbId();
                 String sourceTableName = e.getSourceTableName();
-                LocalDateTime nowDateTime = LocalDateTime.now();
-                nowDateTime = nowDateTime.plusDays(-1);
-//                nowDateTime = nowDateTime.plusHours(-3);
-                LocalDateTime endTime = nowDateTime;
-                LocalDateTime beginTime;
-                if (sourceTableName.toUpperCase().contains(MIN) || etl) {
-                    beginTime = nowDateTime.plusMinutes(-10);
-                } else if (sourceTableName.toUpperCase().contains(HOR)) {
-                    beginTime = nowDateTime.plusHours(-12);
-                } else {
-                    beginTime = nowDateTime.plusDays(-1);
-                }
-//                String beginStr = DTF.format(beginTime);
-//                String endStr = DTF.format(endTime);
-                String beginStr = "2020-07-21 00:00:00";
-                String endStr = "2020-08-20 00:00:00";
-                System.out.println("查询" + sDbId + "." + SCHEMA + "." + sourceTableName);
-                Map<String, Object> sm = getCount(sDbId, sourceTableName, beginStr, endStr, etl);
-                long sCount = (long) sm.get(COUNT);
-                String sSql = sm.get(SQL).toString();
                 String tDbId = e.getTDbId();
                 String targetTableName = e.getTargetTableName();
-                System.out.println("查询" + tDbId + "." + SCHEMA + "." + targetTableName);
-                Map<String, Object> tm = getCount(tDbId, targetTableName, beginStr, endStr, etl);
-                long tCount = (long) tm.get(COUNT);
-                String tSql = tm.get(SQL).toString();
+//                if (targetTableName.contains("TEST") || taskName.contains("ETL")) {
+//                    return;
+//                }
+//                if (!taskName.contains("高空") && !taskName.contains("地面") && !taskName.contains("海洋")) {
+//                    return;
+//                }
+                LocalDateTime nowDateTime = LocalDateTime.now();
+                nowDateTime = nowDateTime.plusDays(-3);
+                LocalDateTime endTime = nowDateTime;
+                LocalDateTime beginTime;
+                if (sourceTableName.toUpperCase().contains(MIN)) {
+                    beginTime = nowDateTime.plusMinutes(-20);
+                } else if (sourceTableName.toUpperCase().contains(HOR)) {
+                    beginTime = nowDateTime.plusHours(-62);
+                } else {
+                    beginTime = nowDateTime.plusDays(-15);
+                }
+                String beginStr = DTF.format(beginTime);
+                String endStr = DTF.format(endTime);
+                System.out.println("查询" + sDbId + "." + SCHEMA + "." + sourceTableName);
+
+                List<Map<String, Object>> sourceData = getSourceData(sDbId, sourceTableName, beginStr, endStr);
+
+                List<String> uniqueKeys = e.getUniqueKeys();
+                if (sourceData.size() == 0) {
+                    return;
+                }
+
                 Map<String, Object> map = Maps.newHashMap();
-                map.put("任务", e.getTaskName());
+                map.put("任务", taskName);
                 map.put("源库", sDbId);
                 map.put("源表", sourceTableName);
-                map.put("源表数据量", sCount);
-                map.put("源表SQL", sSql);
                 map.put("目标库", tDbId);
                 map.put("目标表", targetTableName);
-                map.put("目标表据量", tCount);
-                map.put("目标表SQL", tSql);
-                map.put("差值", sCount - tCount);
+
+                List<String> tabCls = new ArrayList<>();
+
+                int same = 0;
+                for (int i = 0; i < sourceData.size(); i++) {
+                    Map<String, Object> u = sourceData.get(i);
+                    List<Map<String, Object>> targetData = getTargetData(tDbId, targetTableName, uniqueKeys, u);
+                    if (targetData.size() > 0) {
+                        Map<String, Object> t = targetData.get(0);
+                        boolean f = u.keySet().size() > t.keySet().size();
+                        boolean b = f ? compareMap(u, t) : compareMap(t, u);
+                        List<String> cls = new ArrayList<>();
+                        u.keySet().stream().forEach(r -> {
+                            String sData = getData(u.get(r));
+                            String tData = getData(targetData.get(0).get(r));
+                            String cl = String.format("[N：%s,S:%s,T:%s]", r, sData, tData);
+                            cls.add(cl);
+                        });
+                        String clStr = cls.stream().collect(Collectors.joining(""));
+                        Map<String, Object> contentMap = Maps.newHashMap();
+                        contentMap.put("任务", taskName);
+                        contentMap.put("源库", sDbId);
+                        contentMap.put("源表", sourceTableName);
+                        contentMap.put("目标库", tDbId);
+                        contentMap.put("目标表", targetTableName);
+                        contentMap.put("条数", String.format("第%s条", i + 1));
+                        contentMap.put("内容", clStr);
+                        contentValues.add(contentMap);
+                        String lineSeparator = System.lineSeparator();
+                        tabCls.add(String.format("{%s}%s", clStr, lineSeparator));
+                        if (b) {
+                            same++;
+                        }else {
+
+                        }
+                    }
+                }
+                String collect = tabCls.stream().collect(Collectors.joining(""));
+                map.put("抽查数据量", sourceData.size());
+                map.put("完全一致数据量", same);
+                map.put("不一致数据量", sourceData.size() - same);
+                System.out.println(collect);
                 values.add(map);
-                String info = String.format("任务：%s\t 源库:%s\t 源表：%s\t %s\t 目标库:%s\t 目标表：%s\t %s\t 差值:%s\t",
-                        String.format("%-45s", e.getTaskName()),
-                        sDbId,
-                        String.format("%-30s", sourceTableName),
-                        String.format("%-10s", sCount),
-                        tDbId,
-                        String.format("%-30s", targetTableName),
-                        String.format("%-10s", tCount),
-                        String.format("%-10s", sCount - tCount));
-
-                System.out.println(info);
-
             });
 
             String path = root + File.separator + fileName;
-            String name = "同步量";
+            String name = "准确性对比";
             List<String> titles = Lists.newArrayList();
             titles.add("任务");
             titles.add("源库");
             titles.add("源表");
-            titles.add("源表数据量");
-            titles.add("源表SQL");
             titles.add("目标库");
             titles.add("目标表");
-            titles.add("目标表据量");
-            titles.add("目标表SQL");
-            titles.add("差值");
-            WriterExcelUtil.writerExcel(path, name, titles, values);
+            titles.add("抽查数据量");
+            titles.add("完全一致数据量");
+            titles.add("不一致数据量");
 
+            String contentName = "数据内容";
+            List<String> contentTitles = Lists.newArrayList();
+            contentTitles.add("任务");
+            contentTitles.add("源库");
+            contentTitles.add("源表");
+            contentTitles.add("目标库");
+            contentTitles.add("目标表");
+            contentTitles.add("条数");
+            contentTitles.add("内容");
+
+            List<Map<String, Object>> maps = new ArrayList<>();
+            Map<String, Object> m = new HashMap<>();
+            m.put("name", name);
+            m.put("titles", titles);
+            m.put("values", values);
+            maps.add(m);
+            Map<String, Object> m1 = new HashMap<>();
+            m1.put("name", contentName);
+            m1.put("titles", contentTitles);
+            m1.put("values", contentValues);
+            maps.add(m1);
+            WriterExcelUtil.writerExcel(path, maps);
         } catch (SQLException e) {
             e.printStackTrace();
         } finally {
@@ -281,43 +340,88 @@ public class SyncMain {
         }
     }
 
-    public static Map<String, Object> getCount(String dbId, String tableName, String beginStr, String endStr, Boolean etl) {
-
+    public static List<Map<String, Object>> getSourceData(String dbId, String tableName, String beginStr, String endStr) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        String sql = String.format(SOURCE_INFO_SQL, SCHEMA, tableName, beginStr, endStr);
         if (dbId == null) {
-            Map<String, Object> m = new HashMap<>();
-            m.put(COUNT, ERROR_COUNT);
-            m.put(SQL, "数据库不存在");
-            return m;
+            return list;
         } else if (tableName.toUpperCase().contains("TEST")) {
-            Map<String, Object> m = new HashMap<>();
-            m.put(COUNT, ERROR_COUNT);
-            m.put(SQL, tableName.toUpperCase() + "表为测试表，不做统计");
-            return m;
+            return list;
         } else if (dbId.toUpperCase().equals(STDB)) {
-            return getStdbCount(tableName, beginStr, endStr);
+            return executeStdbSql(sql);
         } else if (dbId.toUpperCase().equals(BFDB)) {
-            return getBfdbCount(tableName, beginStr, endStr);
+            return executeBfdbSql(sql);
         } else if (dbId.toUpperCase().equals(HADB)) {
-            return getHadbCount(tableName, beginStr, endStr);
+            return executeHadbSql(sql);
         } else {
-            Map<String, Object> m = new HashMap<>();
-            m.put(COUNT, ERROR_COUNT);
-            m.put(SQL, "未知错误");
-            return m;
+            return list;
         }
     }
 
-    public static Map<String, Object> getStdbCount(String tableName, String beginStr, String endStr) {
-        long count = ERROR_COUNT;
+
+    public static List<Map<String, Object>> getTargetData(String dbId, String tableName, List<String> uniqueKeys, Map<String, Object> sourceData) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        String where = uniqueKeys.stream().map(e -> {
+            Object o = sourceData.get(e);
+            String dataString = getDataString(o);
+            return e + " = '" + dataString + "'";
+        }).collect(Collectors.joining(" AND "));
+
+        String sql = String.format(TARGET_INFO_SQL, SCHEMA, tableName, where);
+        if (dbId == null) {
+            return list;
+        } else if (tableName.toUpperCase().contains("TEST")) {
+            return list;
+        } else if (dbId.toUpperCase().equals(STDB)) {
+            return executeStdbSql(sql);
+        } else if (dbId.toUpperCase().equals(BFDB)) {
+            return executeBfdbSql(sql);
+        } else if (dbId.toUpperCase().equals(HADB)) {
+            return executeHadbSql(sql);
+        } else {
+            return list;
+        }
+    }
+
+
+    public static String getDataString(Object o) {
+        if (o instanceof Date || o instanceof java.sql.Date) {
+            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            return simpleDateFormat.format(o);
+        } else {
+            if (o == null) {
+                return "";
+            } else {
+                return o.toString();
+            }
+
+        }
+    }
+
+    public static String getData(Object o) {
+        if (o instanceof Date || o instanceof java.sql.Date) {
+            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            return simpleDateFormat.format(o);
+        } else if (o instanceof java.math.BigDecimal) {
+            return ((BigDecimal) o).stripTrailingZeros().toString().trim();
+        } else {
+            if (o != null) {
+                return o.toString().trim();
+            } else {
+                return "";
+            }
+        }
+
+    }
+
+    public static List<Map<String, Object>> executeStdbSql(String executeSql) {
         Statement statement = null;
         ResultSet rs = null;
-        String stdbSql = String.format(COUNT_SQL, SCHEMA, tableName, beginStr, endStr);
+        List<Map<String, Object>> list = new ArrayList<>();
         try {
             statement = connection.get(STDB).createStatement();
-            rs = statement.executeQuery(stdbSql);
-            while (rs.next()) {
-                count = rs.getLong(1);
-            }
+            rs = statement.executeQuery(executeSql);
+            list = getResultSetToMap(rs);
             rs.close();
             statement.close();
         } catch (SQLException e) {
@@ -338,23 +442,17 @@ public class SyncMain {
                 }
             }
         }
-        Map<String, Object> m = new HashMap<>();
-        m.put(COUNT, count);
-        m.put(SQL, stdbSql);
-        return m;
+        return list;
     }
 
-    public static Map<String, Object> getBfdbCount(String tableName, String beginStr, String endStr) {
-        long count = ERROR_COUNT;
+    public static List<Map<String, Object>> executeBfdbSql(String executeSql) {
         Statement statement = null;
         ResultSet rs = null;
-        String bfdbSql = String.format(COUNT_SQL, SCHEMA, tableName, beginStr, endStr);
+        List<Map<String, Object>> list = new ArrayList<>();
         try {
             statement = connection.get(BFDB).createStatement();
-            rs = statement.executeQuery(bfdbSql);
-            while (rs.next()) {
-                count = rs.getLong(1);
-            }
+            rs = statement.executeQuery(executeSql);
+            list = getResultSetToMap(rs);
             rs.close();
             statement.close();
         } catch (SQLException e) {
@@ -375,23 +473,17 @@ public class SyncMain {
                 }
             }
         }
-        Map<String, Object> m = new HashMap<>();
-        m.put(COUNT, count);
-        m.put(SQL, bfdbSql);
-        return m;
+        return list;
     }
 
-    public static Map<String, Object> getHadbCount(String tableName, String beginStr, String endStr) {
-        long count = ERROR_COUNT;
+    public static List<Map<String, Object>> executeHadbSql(String executeSql) {
         Statement statement = null;
         ResultSet rs = null;
-        String hadbSql = String.format(COUNT_SQL, SCHEMA, tableName, beginStr, endStr);
+        List<Map<String, Object>> list = new ArrayList<>();
         try {
             statement = connection.get(HADB).createStatement();
-            rs = statement.executeQuery(hadbSql);
-            while (rs.next()) {
-                count = rs.getLong(1);
-            }
+            rs = statement.executeQuery(executeSql);
+            list = getResultSetToMap(rs);
             rs.close();
             statement.close();
         } catch (SQLException e) {
@@ -412,12 +504,43 @@ public class SyncMain {
                 }
             }
         }
-        Map<String, Object> m = new HashMap<>();
-        m.put(COUNT, count);
-        m.put(SQL, hadbSql);
-        return m;
+        return list;
     }
 
+    public static List<Map<String, Object>> getResultSetToMap(ResultSet rs) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        // 获得结果集结构信息（元数据）
+        ResultSetMetaData md = null;
+        try {
+            md = rs.getMetaData();
+            // ResultSet列数
+            int columnCount = md.getColumnCount();
+            // ResultSet转List<Map>数据结构
+            // next用于移动到ResultSet的下一行，使下一行成为当前行
+            while (rs.next()) {
+                Map<String, Object> map = new HashMap<>();
+                // 遍历获取对当前行的每一列的键值对，put到map中
+                for (int i = 1; i <= columnCount; i++) {
+                    // rs.getObject(i) 获得当前行某一列字段的值
+                    map.put(md.getColumnName(i).toUpperCase(), rs.getObject(i));
+                }
+                list.add(map);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return list;
+
+    }
+
+    public static boolean compareMap(Map<String, Object> sourceMap, Map<String, Object> targetMap) {
+        return !sourceMap.keySet().stream()
+                .anyMatch(e ->
+                        sourceMap.get(e) != null
+                                && !e.toUpperCase().equals("D_IYMDHM")
+                                && !e.toUpperCase().equals("D_UPDATE_TIME")
+                                && !getData(sourceMap.get(e)).equals(getData(targetMap.get(e))));
+    }
 
     @Data
     public class SyncInfo {
@@ -426,5 +549,6 @@ public class SyncMain {
         private String tDbId;
         private String sourceTableName;
         private String targetTableName;
+        private List<String> uniqueKeys;
     }
 }
